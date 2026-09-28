@@ -13,6 +13,7 @@ jobs:
       build_matrix: ${{ env.build_matrix }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Fetch Build Matrix
         run: |
           matrix_content=$(yq -oj -I0 'build.yaml')
@@ -34,18 +35,13 @@ jobs:
         run: echo "build_dir=$(mktemp -d)" >> $GITHUB_ENV
 
       - name: Prepare variables
-        env:
-          board: ${{ matrix.board }}
-          shield: ${{ matrix.shield }}
-          artifact_name: ${{ matrix.artifact-name }}
-          snippet: ${{ matrix.snippet }}
         run: |
           extra_west_args=""
-          if [ -n "${snippet}" ]; then
-            extra_west_args="-S ${snippet}"
+          if [ -n "${{ matrix.snippet }}" ]; then
+            extra_west_args="-S ${{ matrix.snippet }}"
           fi
           echo "extra_west_args=${extra_west_args}" >> $GITHUB_ENV
-          echo "artifact_name=${artifact_name:-${board}-zmk}" >> $GITHUB_ENV
+          echo "artifact_name=${{ matrix.artifact-name }}" >> $GITHUB_ENV
 
       - name: West Init
         run: west init -l config
@@ -57,27 +53,24 @@ jobs:
         run: west zephyr-export
 
       - name: West Build
-        env:
-          board: ${{ matrix.board }}
-          shield: ${{ matrix.shield }}
-          cmake_args: ${{ matrix.cmake-args }}
         run: |
-          extra=""
-          if [ -n "$shield" ]; then
-            extra="$extra -DSHIELD=${shield}"
+          NAME="${{ matrix.artifact-name }}"
+          if [ -z "$NAME" ]; then
+            NAME="${{ matrix.board }}-zmk"
           fi
-          west build -s zmk/app -d "${{ env.build_dir }}" -b "$board" ${{ env.extra_west_args }} -- \
+          echo "artifact_name=$NAME" >> $GITHUB_ENV
+
+          west build -s zmk/app -d "${{ env.build_dir }}" -b "${{ matrix.board }}" ${{ env.extra_west_args }} -- \
             -DZMK_CONFIG="${GITHUB_WORKSPACE}/config" \
             -DZMK_EXTRA_MODULES="${GITHUB_WORKSPACE}" \
-            $extra \
-            $cmake_args
+            -DSHIELD="${{ matrix.shield }}" \
+            ${{ matrix.cmake-args }}
 
       - name: Rename artifacts
         run: |
           mkdir -p "${{ env.build_dir }}/artifacts"
-          name="${{ env.artifact_name }}"
           if [ -f "${{ env.build_dir }}/zephyr/zmk.uf2" ]; then
-            cp "${{ env.build_dir }}/zephyr/zmk.uf2" "${{ env.build_dir }}/artifacts/${name}.uf2"
+            cp "${{ env.build_dir }}/zephyr/zmk.uf2" "${{ env.build_dir }}/artifacts/${{ env.artifact_name }}.uf2"
           fi
           ls -la "${{ env.build_dir }}/artifacts" || true
 
