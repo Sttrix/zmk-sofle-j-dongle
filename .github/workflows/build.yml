@@ -1,100 +1,16 @@
-name: Build ZMK firmware
-
-on:
-  workflow_dispatch:
-  push:
-    paths-ignore:
-      - "keymap-drawer/**"
-
-jobs:
-  matrix:
-    runs-on: ubuntu-22.04
-    outputs:
-      build_matrix: ${{ env.build_matrix }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Fetch Build Matrix
-        run: |
-          matrix_content=$(yq -oj -I0 'build.yaml')
-          echo "build_matrix=$matrix_content" >> $GITHUB_ENV
-          echo "$matrix_content"
-
-  build:
-    runs-on: ubuntu-latest
-    container:
-      image: zmkfirmware/zmk-build-arm:stable
-    needs: matrix
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.matrix.outputs.build_matrix) }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Create build directory
-        run: echo "build_dir=$(mktemp -d)" >> $GITHUB_ENV
-
-      - name: Isolate config
-        run: |
-          BASE=/tmp/zmk-config
-          mkdir -p "$BASE/config"
-          cp -R config/* "$BASE/config/"
-          echo "base_dir=$BASE" >> $GITHUB_ENV
-
-          extra_west_args=""
-          if [ -n "${{ matrix.snippet }}" ]; then
-            extra_west_args="-S ${{ matrix.snippet }}"
-          fi
-          echo "extra_west_args=${extra_west_args}" >> $GITHUB_ENV
-
-          NAME="${{ matrix.artifact-name }}"
-          if [ -z "$NAME" ]; then
-            NAME="${{ matrix.board }}-zmk"
-          fi
-          echo "artifact_name=$NAME" >> $GITHUB_ENV
-
-      - name: West Init
-        working-directory: ${{ env.base_dir }}
-        run: west init -l config
-
-      - name: West Update
-        working-directory: ${{ env.base_dir }}
-        run: west update --fetch-opt=--filter=tree:0
-
-      - name: West Zephyr export
-        working-directory: ${{ env.base_dir }}
-        run: west zephyr-export
-
-      - name: West Build
-        working-directory: ${{ env.base_dir }}
-        run: |
-          west build -s zmk/app -d "${{ env.build_dir }}" -b "${{ matrix.board }}" ${{ env.extra_west_args }} -- \
-            -DZMK_CONFIG="${{ env.base_dir }}/config" \
-            -DZMK_EXTRA_MODULES="${GITHUB_WORKSPACE}" \
-            -DSHIELD="${{ matrix.shield }}" \
-            ${{ matrix.cmake-args }}
-
-      - name: Rename artifacts
-        run: |
-          mkdir -p "${{ env.build_dir }}/artifacts"
-          if [ -f "${{ env.build_dir }}/zephyr/zmk.uf2" ]; then
-            cp "${{ env.build_dir }}/zephyr/zmk.uf2" "${{ env.build_dir }}/artifacts/${{ env.artifact_name }}.uf2"
-          fi
-          ls -la "${{ env.build_dir }}/artifacts" || true
-
-      - name: Archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: artifact-${{ env.artifact_name }}
-          path: ${{ env.build_dir }}/artifacts
-
-  merge:
-    runs-on: ubuntu-latest
-    needs: build
-    if: always()
-    steps:
-      - uses: actions/upload-artifact/merge@v4
-        with:
-          name: firmware
-          pattern: artifact-*
-          delete-merged: true
+---
+include:
+  - board: nice_nano_v2
+    shield: eyelash_sofle_central_dongle dongle_display
+    snippet: studio-rpc-usb-uart
+    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n
+    artifact-name: dongle
+  - board: nice_nano_v2
+    shield: eyelash_sofle_peripheral_left nice_view
+    artifact-name: left
+  - board: nice_nano_v2
+    shield: eyelash_sofle_peripheral_right nice_view
+    artifact-name: right
+  - board: nice_nano_v2
+    shield: settings_reset
+    artifact-name: settings_reset
