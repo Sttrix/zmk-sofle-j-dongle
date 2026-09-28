@@ -34,34 +34,42 @@ jobs:
       - name: Create build directory
         run: echo "build_dir=$(mktemp -d)" >> $GITHUB_ENV
 
-      - name: Prepare variables
+      - name: Isolate config
         run: |
+          BASE=/tmp/zmk-config
+          mkdir -p "$BASE/config"
+          cp -R config/* "$BASE/config/"
+          echo "base_dir=$BASE" >> $GITHUB_ENV
+
           extra_west_args=""
           if [ -n "${{ matrix.snippet }}" ]; then
             extra_west_args="-S ${{ matrix.snippet }}"
           fi
           echo "extra_west_args=${extra_west_args}" >> $GITHUB_ENV
-          echo "artifact_name=${{ matrix.artifact-name }}" >> $GITHUB_ENV
 
-      - name: West Init
-        run: west init -l config
-
-      - name: West Update
-        run: west update --fetch-opt=--filter=tree:0
-
-      - name: West Zephyr export
-        run: west zephyr-export
-
-      - name: West Build
-        run: |
           NAME="${{ matrix.artifact-name }}"
           if [ -z "$NAME" ]; then
             NAME="${{ matrix.board }}-zmk"
           fi
           echo "artifact_name=$NAME" >> $GITHUB_ENV
 
+      - name: West Init
+        working-directory: ${{ env.base_dir }}
+        run: west init -l config
+
+      - name: West Update
+        working-directory: ${{ env.base_dir }}
+        run: west update --fetch-opt=--filter=tree:0
+
+      - name: West Zephyr export
+        working-directory: ${{ env.base_dir }}
+        run: west zephyr-export
+
+      - name: West Build
+        working-directory: ${{ env.base_dir }}
+        run: |
           west build -s zmk/app -d "${{ env.build_dir }}" -b "${{ matrix.board }}" ${{ env.extra_west_args }} -- \
-            -DZMK_CONFIG="${GITHUB_WORKSPACE}/config" \
+            -DZMK_CONFIG="${{ env.base_dir }}/config" \
             -DZMK_EXTRA_MODULES="${GITHUB_WORKSPACE}" \
             -DSHIELD="${{ matrix.shield }}" \
             ${{ matrix.cmake-args }}
