@@ -40,14 +40,12 @@ jobs:
           artifact_name: ${{ matrix.artifact-name }}
           snippet: ${{ matrix.snippet }}
         run: |
-          echo "base_dir=${GITHUB_WORKSPACE}" >> $GITHUB_ENV
           extra_west_args=""
           if [ -n "${snippet}" ]; then
             extra_west_args="-S ${snippet}"
           fi
           echo "extra_west_args=${extra_west_args}" >> $GITHUB_ENV
-          echo "extra_cmake_args=${shield:+-DSHIELD=$shield}" >> $GITHUB_ENV
-          echo "artifact_name=${artifact_name:-${shield:+$shield-}${board}-zmk}" >> $GITHUB_ENV
+          echo "artifact_name=${artifact_name:-${board}-zmk}" >> $GITHUB_ENV
 
       - name: West Init
         run: west init -l config
@@ -59,14 +57,29 @@ jobs:
         run: west zephyr-export
 
       - name: West Build
-        run: west build -s zmk/app -d "${{ env.build_dir }}" -b "${{ matrix.board }}" ${{ env.extra_west_args }} -- -DZMK_CONFIG="${GITHUB_WORKSPACE}/config" ${{ env.extra_cmake_args }} ${{ matrix.cmake-args }}
+        env:
+          board: ${{ matrix.board }}
+          shield: ${{ matrix.shield }}
+          cmake_args: ${{ matrix.cmake-args }}
+        run: |
+          extra=""
+          if [ -n "$shield" ]; then
+            extra="$extra -DSHIELD=${shield}"
+          fi
+          west build -s zmk/app -d "${{ env.build_dir }}" -b "$board" ${{ env.extra_west_args }} -- \
+            -DZMK_CONFIG="${GITHUB_WORKSPACE}/config" \
+            -DZMK_EXTRA_MODULES="${GITHUB_WORKSPACE}" \
+            $extra \
+            $cmake_args
 
       - name: Rename artifacts
         run: |
           mkdir -p "${{ env.build_dir }}/artifacts"
+          name="${{ env.artifact_name }}"
           if [ -f "${{ env.build_dir }}/zephyr/zmk.uf2" ]; then
-            cp "${{ env.build_dir }}/zephyr/zmk.uf2" "${{ env.build_dir }}/artifacts/${{ env.artifact_name }}.uf2"
+            cp "${{ env.build_dir }}/zephyr/zmk.uf2" "${{ env.build_dir }}/artifacts/${name}.uf2"
           fi
+          ls -la "${{ env.build_dir }}/artifacts" || true
 
       - name: Archive
         uses: actions/upload-artifact@v4
@@ -77,6 +90,7 @@ jobs:
   merge:
     runs-on: ubuntu-latest
     needs: build
+    if: always()
     steps:
       - uses: actions/upload-artifact/merge@v4
         with:
